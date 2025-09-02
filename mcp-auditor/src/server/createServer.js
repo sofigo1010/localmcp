@@ -4,12 +4,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import addFormats from 'ajv-formats';
 import Ajv from 'ajv';
 import { loadManifest } from './manifest.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '../../..');
+const projectRoot = path.resolve(__dirname, '../..'); 
 
 function resolveFromRoot(p) {
   if (!p) return null;
@@ -32,17 +33,25 @@ export async function createServer({ log = () => {} } = {}) {
   // 1) Manifest
   const manifest = await loadManifest({ root: projectRoot });
   const ajv = new Ajv({ allErrors: true, strict: false });
+  addFormats(ajv); // <- esto elimina el warning y valida "format": "uri"
 
   // 2) Cargar schemas (inline o por archivo)
-  async function loadSchemaMaybe(schemaInline, schemaPath) {
-    if (schemaInline && typeof schemaInline === 'object') return schemaInline;
-    if (schemaPath && typeof schemaPath === 'string') {
-      const abs = resolveFromRoot(schemaPath);
-      const raw = await fs.readFile(abs, 'utf8');
-      return JSON.parse(raw);
+  // 2) Cargar schemas (inline o por archivo; acepta objeto en cualquiera de los dos campos)
+    async function loadSchemaMaybe(primary, secondary) {
+    // helper: convierte valor (obj o path) a objeto esquema
+    const toSchema = async (val) => {
+        if (!val) return null;
+        if (typeof val === 'object') return val; // inline
+        if (typeof val === 'string') {
+        const abs = resolveFromRoot(val);
+        const raw = await fs.readFile(abs, 'utf8');
+        return JSON.parse(raw);
+        }
+        return null;
+    };
+    // intenta primero el primario; si no, el secundario
+    return (await toSchema(primary)) ?? (await toSchema(secondary));
     }
-    return null;
-  }
 
   // 3) Construir registro de tools
   const tools = {};
@@ -175,12 +184,23 @@ export async function createServer({ log = () => {} } = {}) {
         }
 
         case 'tools/call': {
-          const { name, arguments: args } = params || {};
-          if (!name) {
-            return toJsonRpcError(id, -32602, 'Missing tool name');
-          }
-          const result = await callTool(name, args || {});
-          return toJsonRpcResult(id, { name, result });
+            const callParams = params || {};
+            const name = callParams.name;
+            const args = callParams.arguments || {};
+
+            if (!name) {
+                return toJsonRpcError(id, -32602, 'Missing tool name');
+            }
+
+            try {
+                // Usa el registro y la función de orquestación con validación + timeout
+                const result = await callTool(name, args);
+                return toJsonRpcResult(id, { name, result });
+            } catch (err) {
+                console.error('[error] tools/call failed:', name, err?.stack || err);
+                const code = Number.isInteger(err?.code) ? err.code : -32000;
+                return toJsonRpcError(id, code, String(err?.message || err), err?.data);
+            }
         }
 
         default:

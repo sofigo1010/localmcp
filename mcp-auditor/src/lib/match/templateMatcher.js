@@ -10,8 +10,6 @@
 // Requisitos: assets/templates/{PP.pdf,TOS.pdf,CS.pdf}
 
 import fs from 'node:fs/promises';
-import path from 'node:path';
-import pdfParse from 'pdf-parse';
 import { similarityAgainstTemplates } from './similarity.js';
 import {
   resolveTemplatePdf,
@@ -36,6 +34,7 @@ const pdfCache = new Map(); // path -> { mtimeMs, size, text }
 /**
  * Lee un PDF y devuelve su texto normalizado.
  * Cachea por (mtime,size) para evitar reparsear.
+ * Implementación con PDF.js (pdfjs-dist) para evitar issues de pdf-parse en Node.
  * @param {string} absPath ruta absoluta al PDF
  * @returns {Promise<string>}
  */
@@ -48,9 +47,29 @@ export async function readPdfToText(absPath) {
     return prev.text;
   }
 
+  // --- Implementación con PDF.js (pdfjs-dist) ---
+  // Import perezoso para no cargar si no hace falta
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+
+  // Leer buffer y convertirlo a Uint8Array (requerido por PDF.js)
   const buf = await fs.readFile(absPath);
-  const out = await pdfParse(buf);
-  const text = normalizeText(out.text || '');
+  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buf) });
+  const doc = await loadingTask.promise;
+
+  let text = '';
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    // items: mapear a .str si existe; unir con espacios
+    const pageText = content.items
+      .map(it => (it && typeof it.str === 'string') ? it.str : '')
+      .join(' ');
+    if (pageText) {
+      text += (i > 1 ? '\n' : '') + pageText;
+    }
+  }
+
+  text = normalizeText(text || '');
 
   pdfCache.set(absPath, { mtimeMs: st.mtimeMs, size: st.size, text });
   return text;

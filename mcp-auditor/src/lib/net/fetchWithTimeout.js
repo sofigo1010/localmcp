@@ -1,140 +1,122 @@
 // src/lib/net/fetchWithTimeout.js
-// Descarga HTML con timeout, UA y límite de tamaño (streaming seguro).
-// Requiere Node 18+ (global fetch / AbortController).
+// Fetch robusto para HTML con:
+//  - Headers realistas (evita bloqueos básicos)
+//  - Timeout con AbortController
+//  - Retries para errores transitorios (timeout / red)
+//  - Límite de tamaño por streaming (no lee más de maxBytes)
+
+import { setTimeout as delay } from 'node:timers/promises';
+
+const DEFAULT_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) ' +
+  'Chrome/126.0.0.0 Safari/537.36';
+
+function buildHeaders(userAgent) {
+  return {
+    'User-Agent': userAgent || DEFAULT_UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    // no mandamos Sec-Fetch-* ni cookies: suficiente para Shopify
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+  };
+}
 
 /**
- * @typedef {Object} FetchOpts
- * @property {number} [timeoutMs=12000]   Tiempo máximo por request.
- * @property {string} [userAgent]         User-Agent a enviar.
- * @property {number} [maxBytes=2_000_000]Límite duro de bytes a leer.
- * @property {AbortSignal} [signal]       Señal externa para cancelar.
- * @property {Object.<string,string>} [headers] Headers extra.
- */
-
-/**
- * Hace fetch y devuelve el cuerpo como texto UTF-8 (hasta maxBytes).
- * Lanza si: timeout, abort, status >= 400, o cuerpo excede maxBytes.
  * @param {string} url
- * @param {FetchOpts} [opts]
- * @returns {Promise<{ url:string, status:number, headers:Record<string,string>, text:string }>}
- */
-export async function fetchWithTimeout(url, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 12_000;
-  const maxBytes  = opts.maxBytes  ?? 2_000_000;
-  const userAgent = opts.userAgent || undefined;
-
-  const ac = new AbortController();
-  const onTimeout = setTimeout(() => ac.abort(new Error('Fetch timeout')), timeoutMs);
-
-  // Propaga abort externo
-  const { signal: outer } = opts;
-  if (outer) {
-    if (outer.aborted) ac.abort(outer.reason || new Error('Aborted'));
-    outer.addEventListener('abort', () => ac.abort(outer.reason || new Error('Aborted')), { once: true });
-  }
-
-  const headers = new Headers(opts.headers || {});
-  if (userAgent) headers.set('user-agent', userAgent);
-  headers.set('accept', headers.get('accept') || 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8');
-
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      signal: ac.signal,
-      headers,
-    });
-
-    const status = res.status;
-    if (status >= 400) {
-      const err = new Error(`Upstream responded ${status}`);
-      // Adjuntamos info útil
-      /** @type {any} */(err).status = status;
-      throw err;
-    }
-
-    // Leemos streaming y cortamos en maxBytes
-    const reader = res.body?.getReader ? res.body.getReader() : null;
-    const chunks = [];
-    let total = 0;
-
-    if (reader) {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          total += value.byteLength;
-          if (total > maxBytes) {
-            // Cancelamos el stream
-            try { await reader.cancel(); } catch {}
-            const err = new Error(`Response too large (> ${maxBytes} bytes)`);
-            /** @type {any} */(err).code = 'E2BIG';
-            throw err;
-          }
-          chunks.push(value);
-        }
-      }
-    } else {
-      // Fallback (entornos sin stream): aún respetamos maxBytes
-      const buf = new Uint8Array(await res.arrayBuffer());
-      if (buf.byteLength > maxBytes) {
-        const err = new Error(`Response too large (> ${maxBytes} bytes)`);
-        /** @type {any} */(err).code = 'E2BIG';
-        throw err;
-      }
-      chunks.push(buf);
-      total = buf.byteLength;
-    }
-
-    const body = concatUint8(chunks, total);
-    const text = decodeUtf8(body);
-
-    const outHeaders = {};
-    for (const [k, v] of res.headers.entries()) outHeaders[k.toLowerCase()] = v;
-
-    return {
-      url: res.url || url, // URL final tras redirects
-      status,
-      headers: outHeaders,
-      text,
-    };
-  } catch (e) {
-    // Normalizamos errores comunes
-    if (e?.name === 'AbortError') {
-      const err = new Error('Request aborted or timed out');
-      /** @type {any} */(err).code = 'ETIMEDOUT';
-      throw err;
-    }
-    throw e;
-  } finally {
-    clearTimeout(onTimeout);
-  }
-}
-
-/** Concatena Uint8Array[] sin copiar de más. */
-function concatUint8(chunks, total) {
-  const out = new Uint8Array(total);
-  let o = 0;
-  for (const c of chunks) {
-    out.set(c, o);
-    o += c.byteLength;
-  }
-  return out;
-}
-
-/** Decodifica UTF-8 con TextDecoder (sin BOM). */
-function decodeUtf8(bytes) {
-  const dec = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
-  return dec.decode(bytes);
-}
-
-/**
- * Atajo semántico para HTML.
- * @param {string} url
- * @param {FetchOpts} [opts]
+ * @param {{
+ *   timeoutMs?: number,
+ *   userAgent?: string,
+ *   maxBytes?: number,
+ *   retries?: number,
+ * }} [opts]
+ * @returns {Promise<{ text: string, status: number, finalUrl: string }>}
  */
 export async function fetchHtml(url, opts = {}) {
-  return fetchWithTimeout(url, opts);
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 20000; // 20s por defecto
+  const maxBytes  = Number.isFinite(opts.maxBytes)  ? opts.maxBytes  : 2_000_000; // 2 MB
+  const retries   = Number.isFinite(opts.retries)   ? opts.retries   : 2;   // 2 reintentos
+  const ua        = opts.userAgent || DEFAULT_UA;
+
+  /** @param {number} attempt */
+  async function once(attempt) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        // compresión la maneja Node fetch automáticamente
+        headers: buildHeaders(ua),
+        signal: ctrl.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (!res.ok) {
+        // homogeneizamos el mensaje que espera el caller
+        throw new Error(`Upstream responded ${res.status}`);
+      }
+
+      let text = '';
+      const decoder = new TextDecoder();
+      let read = 0;
+
+      // Web Streams (WHATWG) en Node 18+ / 22
+      if (res.body && typeof res.body.getReader === 'function') {
+        const reader = res.body.getReader();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value && value.byteLength) {
+            read += value.byteLength;
+            const remaining = maxBytes - (read - value.byteLength);
+            if (remaining <= 0) {
+              // ya alcanzamos el límite con el chunk anterior
+              break;
+            }
+            // corta el chunk si excede
+            const slice = remaining < value.byteLength ? value.subarray(0, remaining) : value;
+            text += decoder.decode(slice, { stream: true });
+            if (slice.byteLength < value.byteLength) break; // alcanzamos límite
+          }
+        }
+        text += decoder.decode(); // flush
+      } else {
+        // Fallback (debería casi no ocurrir)
+        const t = await res.text();
+        text = t.slice(0, maxBytes);
+      }
+
+      return { text, status: res.status, finalUrl: res.url || url };
+    } catch (err) {
+      clearTimeout(timer);
+      // AbortError → timeout
+      const msg = String(err?.message || err);
+      if (msg.includes('The operation was aborted') || msg.includes('aborted')) {
+        throw new Error('Fetch timeout');
+      }
+      // Propaga tal cual para que el caller distinga "Upstream responded X"
+      throw err;
+    }
+  }
+
+  let lastErr = null;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await once(i);
+    } catch (err) {
+      const msg = String(err?.message || err);
+      lastErr = err;
+      // Solo reintentar en errores transitorios típicos
+      const transient = /timeout|aborted|ENOTFOUND|ECONNRESET|ETIMEDOUT|fetch failed/i.test(msg);
+      if (!transient || i === retries) break;
+      // pequeño backoff
+      await delay(250 * (i + 1));
+    }
+  }
+  throw lastErr || new Error('fetch failed');
 }
 
-export default fetchWithTimeout;
+export default { fetchHtml };

@@ -1,103 +1,41 @@
 {
   "name": "mcp-auditor",
   "version": "0.1.0",
-  "description": "MCP server (stdio) con la tool audit_site para auditar Privacy Policy / Terms of Service / FAQ.",
-  "vendor": "Sofi (DeltaScan/BevStack)",
-  "transport": "stdio",
-  "limits": {
-    "timeout_ms_default": 12000,
-    "max_concurrency": 5,
-    "max_html_size_bytes": 2000000
-  },
-  "env": {
-    "BEVSTACK_AUDITOR_TIMEOUT_MS": "Override del timeout por petición.",
-    "BEVSTACK_AUDITOR_UA": "User-Agent a usar en fetch.",
-    "BEVSTACK_AUDITOR_PASS_THRESHOLD": "Umbral de pase para similarity (0–1).",
-    "BEVSTACK_AUDITOR_FAQ_SOFT_PASS": "Permite pase suave de FAQ (true/false)."
-  },
+  "description": "MCP stdio server that audits Privacy Policy, Terms of Service and FAQ using TF-IDF similarity + required sections + spellcheck.",
+  "license": "MIT",
   "tools": [
     {
       "name": "audit_site",
-      "description": "Audita PP/TOS/FAQ de un sitio; salida 1:1 con la API actual.",
-      "input_schema": "./src/schemas/audit_site.input.schema.json",
-      "output_schema": "./src/schemas/audit_site.output.schema.json",
-      "timeout_ms": 12000
-    },
-    {
-      "name": "get_required_sections",
-      "description": "Devuelve checklist de secciones requeridas por tipo (privacy|terms|faq).",
-      "input_schema_inline": {
-        "type": "object",
-        "properties": {
-          "type": { "type": "string", "enum": ["privacy", "terms", "faq"] }
-        },
-        "required": ["type"],
-        "additionalProperties": false
-      },
-      "output_schema_inline": {
-        "type": "object",
-        "properties": {
-          "sections": { "type": "array", "items": { "type": "string" } }
-        },
-        "required": ["sections"],
-        "additionalProperties": false
-      },
-      "timeout_ms": 2000,
-      "optional": true
-    },
-    {
-      "name": "get_templates_info",
-      "description": "Metadatos de los templates PDF incluidos en assets/templates.",
-      "input_schema_inline": {
-        "type": "object",
-        "properties": {},
-        "additionalProperties": false
-      },
-      "output_schema_inline": {
-        "type": "object",
-        "properties": {
-          "templates": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "name": { "type": "string" },
-                "path": { "type": "string" },
-                "size": { "type": "integer" }
-              },
-              "required": ["name", "path", "size"],
-              "additionalProperties": false
-            }
-          }
-        },
-        "required": ["templates"],
-        "additionalProperties": false
-      },
-      "timeout_ms": 2000,
-      "optional": true
-    },
-    {
-      "name": "dry_run",
-      "description": "Descubre candidatos (links) y headings sin scoring de templates (debug).",
-      "input_schema_inline": {
+      "description": "Audit a website’s Privacy Policy, Terms of Service, and FAQ.",
+      "input_schema": {
         "type": "object",
         "properties": {
           "url": { "type": "string", "format": "uri" }
         },
         "required": ["url"],
         "additionalProperties": false
-      },
-      "output_schema_inline": {
+      }
+    },
+    {
+      "name": "get_required_sections",
+      "description": "List required sections for a given document type.",
+      "input_schema": {
         "type": "object",
         "properties": {
-          "candidates": { "type": "array", "items": { "type": "string" } },
-          "headings": { "type": "array", "items": { "type": "string" } }
+          "type": { "type": "string", "enum": ["privacy", "terms", "faq"] }
         },
-        "required": ["candidates", "headings"],
+        "required": ["type"],
         "additionalProperties": false
-      },
-      "timeout_ms": 8000,
-      "optional": true
+      }
+    },
+    {
+      "name": "get_templates_info",
+      "description": "Return template files info (name, size, path).",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
     }
   ]
 }

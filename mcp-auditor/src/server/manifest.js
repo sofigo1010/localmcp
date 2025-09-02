@@ -9,6 +9,9 @@ import Ajv from 'ajv';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Raíz del paquete (dos niveles arriba: src/server -> mcp-auditor)
+const PKG_ROOT = path.resolve(__dirname, '../..');
+
 // Defaults razonables si no vienen en el manifest
 const DEFAULT_LIMITS = Object.freeze({
   timeout_ms_default: 12_000,
@@ -34,64 +37,78 @@ const manifestSchema = {
       },
       additionalProperties: true,
     },
-    env: {
-      type: 'object',
-      additionalProperties: { type: 'string' },
-    },
+    env: { type: 'object', additionalProperties: { type: 'string' } },
     tools: {
       type: 'array',
+      minItems: 1,
       items: {
         type: 'object',
         properties: {
           name: { type: 'string', minLength: 1 },
           description: { type: 'string' },
-          input_schema: { type: 'string' },
-          output_schema: { type: 'string' },
-          input_schema_inline: { type: 'object' },
-          output_schema_inline: { type: 'object' },
+
+          // Aceptar RUTA (string) o esquema inline (object)
+          input_schema: { oneOf: [{ type: 'string' }, { type: 'object' }] },
+          output_schema: { oneOf: [{ type: 'string' }, { type: 'object' }] },
+
+          input_schema_inline: { type: 'object' },   // compat
+          output_schema_inline: { type: 'object' },  // compat
+
           timeout_ms: { type: 'integer', minimum: 1 },
           optional: { type: 'boolean' },
         },
         required: ['name'],
         additionalProperties: true,
       },
-      minItems: 1,
     },
   },
   required: ['name', 'version', 'tools'],
   additionalProperties: true,
 };
 
+async function tryRead(p) {
+  if (!p) return null;
+  try {
+    const raw = await fs.readFile(p, 'utf8');
+    const json = JSON.parse(raw);
+    return { path: p, json };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Carga mcp.manifest.json desde la raíz del proyecto, valida y normaliza.
- * @param {{ root?: string }} opts
- * @returns {Promise<Readonly<any>>}
+ * Carga mcp.manifest.json desde la ubicación adecuada, valida y normaliza.
+ * Prioridad:
+ *  1) MCP_MANIFEST_PATH (si se define)
+ *  2) CWD/mcp.manifest.json
+ *  3) PKG_ROOT/mcp.manifest.json (mcp-auditor)
+ *  4) PKG_ROOT/../mcp.manifest.json (monorepo padre)
  */
 export async function loadManifest(opts = {}) {
-  const projectRoot =
-    opts.root || path.resolve(__dirname, '../../..');
+  const envPath = process.env.MCP_MANIFEST_PATH
+    ? path.resolve(process.env.MCP_MANIFEST_PATH)
+    : null;
 
-  const manifestPath = path.join(projectRoot, 'mcp.manifest.json');
+  const candidates = [
+    envPath,                                             // 1) ENV explícito
+    path.join(process.cwd(), 'mcp.manifest.json'),       // 2) CWD
+    path.join(PKG_ROOT, 'mcp.manifest.json'),            // 3) raíz del paquete
+    path.join(PKG_ROOT, '..', 'mcp.manifest.json'),      // 4) raíz del monorepo
+  ].filter(Boolean);
 
-  let raw;
-  try {
-    raw = await fs.readFile(manifestPath, 'utf8');
-  } catch (e) {
-    const err = new Error(
-      `Manifest not found at ${manifestPath}. Asegúrate de tener mcp.manifest.json.`
-    );
-    err.cause = e;
-    throw err;
+  let found = null;
+  for (const c of candidates) {
+    const hit = await tryRead(c);
+    if (hit) { found = hit; break; }
   }
 
-  let manifest;
-  try {
-    manifest = JSON.parse(raw);
-  } catch (e) {
-    const err = new Error(`Invalid JSON in manifest: ${e.message}`);
-    err.cause = e;
-    throw err;
+  if (!found) {
+    const list = candidates.map(c => `- ${c}`).join('\n');
+    throw new Error(`Manifest not found. Checked:\n${list}`);
   }
+
+  let manifest = found.json;
 
   // Defaults
   manifest.transport ||= 'stdio';
@@ -115,11 +132,10 @@ export async function loadManifest(opts = {}) {
     }
     seen.add(tool.name);
 
-    // Si no hay input_schema declarado, asumimos objeto vacío (sin params)
+    // Normaliza: si no hay input_schema declarada, poner objeto vacío
     if (!tool.input_schema && !tool.input_schema_inline) {
       tool.input_schema_inline = { type: 'object', additionalProperties: false };
     }
-    // output_schema puede omitirse; lo validamos opcionalmente en runtime si existe
   }
 
   return Object.freeze(manifest);

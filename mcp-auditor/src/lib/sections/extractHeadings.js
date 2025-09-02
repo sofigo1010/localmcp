@@ -8,7 +8,7 @@
 //  - De-duplica preservando el orden
 //  - Limita resultados (maxItems) para evitar explosiones
 
-import cheerio from 'cheerio';
+import { load } from 'cheerio';
 
 /**
  * @typedef {Object} ExtractOpts
@@ -34,7 +34,8 @@ export function extractHeadings(html, opts = {}) {
   const maxItems = clampInt(opts.maxItems ?? 200, 1, 10_000);
   const includeTitle = opts.includeTitle ?? true;
 
-  const $ = cheerio.load(html, { decodeEntities: true, lowerCaseTags: true });
+  // ✅ usar la función importada "load" (no "cheerio.load")
+  const $ = load(html, { decodeEntities: true, lowerCaseTags: true });
 
   /** @type {string[]} */
   const out = [];

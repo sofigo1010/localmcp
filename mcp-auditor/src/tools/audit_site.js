@@ -38,6 +38,20 @@ import { getSimilarityThreshold } from '../lib/audit/thresholds.js';
 
 const TYPES = /** @type {const} */ (['privacy', 'terms', 'faq']);
 
+// ---- Helpers para tails configurables por ENV (prepend/append) ----
+function envList(name) {
+  return (process.env[name] || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+function getTails(kind, defaults) {
+  const pre = envList(`BEVSTACK_AUDITOR_${kind}_TAILS_PREPEND`);
+  const app = envList(`BEVSTACK_AUDITOR_${kind}_TAILS_APPEND`);
+  const norm = (s) => s.replace(/^\/+/, '');
+  return [...pre.map(norm), ...defaults.map(norm), ...app.map(norm)];
+}
+
 /**
  * @param {{ url:string }} args
  * @param {{ log?:(level:string,...args:any[])=>void }} ctx
@@ -58,6 +72,26 @@ export default async function auditSiteTool(args, { log }) {
   }
 
   const env = loadEnvConfig();
+
+  // ---- Tails por tipo (Shopify-friendly) + ENV overrides ----
+  // Evitamos tails genéricos como "policy/policies" que llevan a shipping/refund.
+  const TAILS = {
+    privacy: getTails('PRIVACY', [
+      'policies/privacy-policy',   // Shopify
+      'legal/privacy',
+      'privacy-policy',
+      'privacy',
+    ]),
+    terms: getTails('TERMS', [
+      'policies/terms-of-service', // Shopify
+      'legal/terms',
+      'terms-of-service',
+      'terms',
+    ]),
+    faq: getTails('FAQ', [
+      'faq', 'faqs', 'help', 'support',
+    ]),
+  };
 
   // 1) Derivar origin del sitio
   let origin = '';
@@ -84,6 +118,7 @@ export default async function auditSiteTool(args, { log }) {
       timeoutMs: env.TIMEOUT_MS,
       userAgent: env.USER_AGENT,
       maxBytes: env.MAX_HTML_SIZE_BYTES,
+      retries: env.FETCH_RETRIES ?? 2,
     });
     homeHtml = text || '';
   } catch (err) {
@@ -91,10 +126,11 @@ export default async function auditSiteTool(args, { log }) {
   }
 
   // 3) Resolver candidatos por tipo (mismo host por defecto)
+  //    Usamos TAILS locales (Shopify-friendly) para evitar falsos positivos.
   const byType = resolveCandidates(
     origin,
     homeHtml,
-    { CANDIDATE_TAILS: env.CANDIDATE_TAILS },
+    { CANDIDATE_TAILS: TAILS },
     { sameHostOnly: true }
   );
 
@@ -163,8 +199,9 @@ async function auditOneType(type, candidates, env, log) {
     try {
       const { text } = await fetchHtml(href, {
         timeoutMs: env.TIMEOUT_MS,
-        userAgent: env.USER_AGENT,
+        userAgent: env.userAgent ?? env.USER_AGENT, // por si tu env usa minúsculas
         maxBytes: env.MAX_HTML_SIZE_BYTES,
+        retries: env.FETCH_RETRIES ?? 2,
       });
       html = text || '';
     } catch (err) {
