@@ -1,87 +1,203 @@
-# localmcp
+# mcp-auditor
 
-mcp-auditor/
-├─ package.json # "type": "module", bin CLI, exports del server
-├─ README.md # Guía de instalación/uso para integradores MCP
-├─ LICENSE
-├─ .gitignore
-├─ .npmignore # Excluir tests/fixtures si publicas a npm
-├─ .editorconfig
-├─ mcp.manifest.json # Manifest MCP: tools, schemas, vendor, version
-│
-├─ bin/
-│ └─ mcp-auditor.js # CLI que habla MCP por stdio (shebang, sin deps externas)
-│
-├─ src/
-│ ├─ server/
-│ │ ├─ createServer.js # Arranque del MCP server: lifecycle + registro de tools
-│ │ ├─ stdioTransport.js # Loop stdio (read/write JSON-RPC); robusto a errores
-│ │ └─ manifest.js # Carga/valida mcp.manifest.json en runtime
-│ │
-│ ├─ tools/
-│ │ ├─ audit_site.js # Tool principal (1:1 con tu API actual) [oai_citation:0‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ ├─ get_required_sections.js # (opcional) expone checklist por tipo [oai_citation:1‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ ├─ get_templates_info.js # (opcional) paths y tamaños de templates [oai_citation:2‡templateMatcher.js](file-service://file-NkaGUqbvynTtwoaDk1HcUF)
-│ │ └─ dry_run.js # (opcional) candidates + headings (debug)
-│ │
-│ ├─ lib/
-│ │ ├─ sections/
-│ │ │ ├─ htmlToPlain.js # Normaliza HTML→texto (sin <script/style>) [oai_citation:3‡sections.js](file-service://file-4JPXwFcFLkPa7R5PVNN8K6)
-│ │ │ └─ extractHeadings.js # H1/H2/H3 limpios [oai_citation:4‡sections.js](file-service://file-4JPXwFcFLkPa7R5PVNN8K6)
-│ │ ├─ match/
-│ │ │ ├─ templateMatcher.js # TF-IDF + coseno + carga de PDFs [oai_citation:5‡templateMatcher.js](file-service://file-NkaGUqbvynTtwoaDk1HcUF)
-│ │ │ ├─ tokenize.js # Tokenización, TF, vocabulario
-│ │ │ └─ similarity.js # Cosine helpers si los separas [oai_citation:6‡templateMatcher.js](file-service://file-NkaGUqbvynTtwoaDk1HcUF)
-│ │ ├─ spell/
-│ │ │ ├─ spellcheck.js # Nspell + typoRate + whitelist (porta tu lógica)
-│ │ │ └─ whitelist.js # Lista de términos permitidos por defecto [oai_citation:7‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ ├─ net/
-│ │ │ ├─ fetchWithTimeout.js # Fetch con AbortController + UA [oai_citation:8‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ │ ├─ findCandidateLink.js# Parser de <a href=...> + resolución [oai_citation:9‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ │ └─ resolveCandidates.js# Guess de tails (/privacy, /terms, /faq) [oai_citation:10‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ ├─ audit/
-│ │ │ ├─ requiredSections.js # Matriz de secciones por tipo [oai_citation:11‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ │ ├─ thresholds.js # PASS_THRESHOLD, FAQ_SOFT_PASS [oai_citation:12‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ │ └─ scorer.js # Orquesta similarity + pass por página [oai_citation:13‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ └─ util/
-│ │ ├─ logger.js # Logs discretos (info/warn/error)
-│ │ └─ ensurePaths.js # Helpers de rutas relativas/absolutas
-│ │
-│ ├─ config/
-│ │ ├─ defaults.js # TIMEOUT_MS, UA, thresholds por defecto [oai_citation:14‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│ │ └─ env.js # Lectura de env (permite override)
-│ │
-│ └─ schemas/
-│ ├─ audit_site.input.schema.json # { url: string }
-│ └─ audit_site.output.schema.json # Igual al JSON de tu API (pages, score, pass) [oai_citation:15‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
-│
-├─ assets/
-│ ├─ templates/
-│ │ ├─ PP.pdf # Privacy template (PDF) [oai_citation:16‡PP.pdf](file-service://file-ENqSX5AZ54FwuVyDBB3sxK)
-│ │ ├─ TOS.pdf # Terms template (PDF) [oai_citation:17‡TOS.pdf](file-service://file-1iTWjJYQznmARj4HuH7tv4)
-│ │ └─ CS.pdf # FAQ/Customer Support template (PDF)
-│ └─ dictionaries/ # (opcional) si bundlas diccionario local
-│ ├─ en_US.dic
-│ └─ en_US.aff
-│
-├─ examples/
-│ └─ node-client/
-│ ├─ README.md # Cómo conectar un chatbot propio por stdio
-│ ├─ package.json
-│ └─ index.js # Cliente MCP mínimo (descubre + llama audit_site)
-│
-└─ tests/
-├─ unit/
-│ ├─ htmlToPlain.spec.js
-│ ├─ templateMatcher.spec.js
-│ └─ spellcheck.spec.js
-├─ integration/
-│ └─ audit_site.e2e.spec.js # Llama al tool y valida shape de salida
-└─ fixtures/
-├─ sites/
-│ ├─ good-privacy.html
-│ ├─ bad-privacy.html
-│ ├─ terms.html
-│ └─ faq.html
-└─ outputs/
-└─ golden-audit.json # Golden master igual que tu API [oai_citation:18‡route.js](file-service://file-Pb3sifPec1fGb7dSkHZSXi)
+**mcp-auditor** is an **MCP (Model Context Protocol) server over stdio** that exposes the `audit_site` tool to audit a website’s **Privacy Policy**, **Terms of Service**, and **FAQ**.
+
+It discovers likely policy pages, fetches them with robust settings (headers, timeouts, retries), converts HTML → text, computes **TF‑IDF + cosine similarity** against bundled **PDF templates**, validates **required sections**, and runs a **spellcheck**. It’s designed so **any custom chatbot** can talk to it over MCP—**no Claude Desktop required**.
+
+> Behavior mirrors a typical compliance API: discover candidate URLs via *tails* (e.g., `/privacy`, `/terms`, `/faq`) and home‑page `<a href>` links; evaluate per‑type thresholds → pass/fail.
+
+---
+
+## Features
+
+- 🔌 **MCP stdio**: JSON‑RPC 2.0 over STDIN/STDOUT (NDJSON or LSP framing, auto‑detected).
+- 🔎 **Smart discovery**: Tries common tails and parses the home page for links. Shopify‑aware tails like `/policies/privacy-policy` and `/policies/terms-of-service` are included.
+- 📄 **Template matching**: Scores against `PP.pdf`, `TOS.pdf`, `CS.pdf` (bundled).
+- ✅ **Section checks**: Validates required sections per document type.
+- 🔤 **Spellcheck**: Hunspell dictionary support with project allowlist.
+- 🛡️ **Robust fetch**: Realistic headers, timeouts, retries, and response size caps.
+- ⚙️ **Configurable**: Thresholds, tails, timeouts, retries, spellcheck, and more via environment variables.
+
+---
+
+## Requirements
+
+- **Node.js ≥ 18.17** (uses `globalThis.fetch` and `AbortController`)
+- Read access to the PDFs in `assets/templates/` (bundled)
+- Optional Hunspell dictionary files in `assets/dictionaries/` (see that folder’s README)
+
+---
+
+## Install
+
+### Local (from the repo)
+
+```bash
+npm i
+```
+
+### Global (if you later publish to npm)
+
+```bash
+npm i -g mcp-auditor
+```
+
+---
+
+## Run the MCP server (stdio)
+
+```bash
+npm start
+```
+
+The server speaks **JSON‑RPC 2.0** over **STDIN/STDOUT**. It supports both **NDJSON** and **LSP‑style** framing and mirrors whichever the client uses first.
+
+If your project uses a custom manifest path, ensure `mcp.manifest.json` is present next to the binary or set your own loader accordingly.
+
+---
+
+## Use it from your chatbot / tool router
+
+1. **Spawn** the server (`node ./bin/mcp-auditor.js` or your installed binary) with stdio pipes open.
+2. Send JSON‑RPC messages:
+   - `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
+   - `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"audit_site","arguments":{"url":"https://..."}}}`
+3. Read `result` and present the report to your user.
+
+### Minimal NDJSON client (shell)
+
+```bash
+# List tools
+printf '%s\n' \
+'{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+| node ./bin/mcp-auditor.js
+
+# Call audit_site
+printf '%s\n' \
+'{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"audit_site","arguments":{"url":"https://example.com"}}}' \
+| node ./bin/mcp-auditor.js
+```
+
+If you prefer a Node client, see `examples/node-client/`.
+
+---
+
+## Tools
+
+### `audit_site` (primary)
+
+**Input**
+
+```json
+{ "url": "https://your-site.com" }
+```
+
+**Output**
+
+```json
+{
+  "overallPass": true,
+  "overallScore": 0.87,
+  "pages": [
+    {
+      "type": "privacy|terms|faq",
+      "foundAt": "https://...",
+      "pass": true,
+      "similarity": 91,
+      "sectionsFound": ["personal information", "cookies", "..."],
+      "sectionsMissing": [],
+      "typos": [],
+      "typoRate": 0.01,
+      "headings": ["Privacy Policy", "Data Security", "..."],
+      "qaCount": 0,
+      "rawTextLength": 25432,
+      "notes": []
+    }
+  ]
+}
+```
+
+**Pass/Fail**
+
+- Overall pass requires **Privacy** and **Terms** to pass.
+- **FAQ** is *soft*; failing FAQ does not block the overall pass.
+- Missing sections tolerance is configurable per type (see env).
+
+**Discovery**
+
+- Built‑in tails include Shopify‑specific routes (e.g., `/policies/privacy-policy`). You can prepend/append tails via env variables.
+
+---
+
+### `get_required_sections` (optional)
+
+- **Input**: `{ "type": "privacy"|"terms"|"faq" }`  
+- **Output**: `{ "sections": ["..."] }`
+
+### `get_templates_info` (optional)
+
+- **Output**: `{ "templates": [{ "name": "PP.pdf", "path": "...", "size": 12345 }, ...] }`
+
+### `dry_run` (optional, debug)
+
+- **Input**: `{ "url": "https://..." }`  
+- **Output**: `{ "candidates": ["..."], "headings": ["..."] }`
+
+---
+
+## Environment variables
+
+> All are optional—reasonable defaults are provided.
+
+| Variable                                | Description                                   | Default |
+| --------------------------------------- | --------------------------------------------- | ------- |
+| `BEVSTACK_TIMEOUT_MS`                   | Per‑request timeout (ms)                      | `20000` |
+| `BEVSTACK_FETCH_RETRIES`                | Retry attempts for transient fetch failures   | `2`     |
+| `BEVSTACK_USER_AGENT`                   | Fetch User‑Agent                              | Realistic desktop UA |
+| `BEVSTACK_MAX_HTML_SIZE_BYTES`          | Max HTML bytes per fetch                      | `2000000` |
+| `BEVSTACK_PASS_THRESHOLD`               | Similarity threshold for Privacy/Terms (0–100)| `80`    |
+| `BEVSTACK_FAQ_SOFT_PASS`                | FAQ soft threshold (0–100)                    | `60`    |
+| `BEVSTACK_ENABLE_SPELLCHECK`            | Enable spellcheck (`true`/`false`)            | `true`  |
+| `BEVSTACK_SPELL_WHITELIST_APPEND`       | Extra allowlist terms (comma‑separated)       | `""`    |
+| `BEVSTACK_ALLOW_MISSING_PRIVACY`        | Allowed missing sections for Privacy          | `1`     |
+| `BEVSTACK_ALLOW_MISSING_TERMS`          | Allowed missing sections for Terms            | `2`     |
+| `BEVSTACK_ALLOW_MISSING_FAQ`            | Allowed missing sections for FAQ              | `0`     |
+| `BEVSTACK_AUDITOR_PRIVACY_TAILS_PREPEND`| Extra discovery tails (comma) for Privacy     | `""`    |
+| `BEVSTACK_AUDITOR_PRIVACY_TAILS_APPEND` | Extra discovery tails (comma) for Privacy     | `""`    |
+| `BEVSTACK_AUDITOR_TERMS_TAILS_PREPEND`  | Extra discovery tails (comma) for Terms       | `""`    |
+| `BEVSTACK_AUDITOR_TERMS_TAILS_APPEND`   | Extra discovery tails (comma) for Terms       | `""`    |
+| `BEVSTACK_AUDITOR_FAQ_TAILS_PREPEND`    | Extra discovery tails (comma) for FAQ         | `""`    |
+| `BEVSTACK_AUDITOR_FAQ_TAILS_APPEND`     | Extra discovery tails (comma) for FAQ         | `""`    |
+
+---
+
+## Assets
+
+The PDF templates live under `assets/templates/`:
+
+- `PP.pdf` (Privacy)
+- `TOS.pdf` (Terms)
+- `CS.pdf` (FAQ / Customer Support)
+
+Replace these PDFs if you need different markets/languages—the matcher adapts to the new text.
+
+The optional dictionary files live under `assets/dictionaries/`:
+
+- `en_US.aff` / `en_US.dic` (Hunspell). If missing, spellcheck disables itself gracefully.
+- `allowlist.txt` (one term per line) to ignore brand/industry words in typo reports.
+
+---
+
+## Troubleshooting
+
+- **Cheerio ESM import error**: use `import { load } from 'cheerio'` and `const $ = load(html)`.
+- **“fetch home failed”**: domain/SSL issue or bot‑protection; the server retries and also tries direct tails.
+- **Spellcheck flags brand names**: add them to `assets/dictionaries/allowlist.txt` or pass `BEVSTACK_SPELL_WHITELIST_APPEND`.
+- **PDF parsing**: the server uses `pdfjs-dist` (PDF.js). Ensure the bundled PDFs exist and are readable.
+- **Framing**: if the client sends `Content‑Length` headers (LSP framing), the server responds in LSP; otherwise it uses NDJSON.
+
+---
+
+## License
+
+MIT — see `LICENSE`.

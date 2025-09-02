@@ -1,23 +1,32 @@
-# Dictionaries
+# Dictionaries & Allowlist (optional)
 
-This folder holds Hunspell dictionaries used by `nspell` for spellchecking.
+This folder can contain spell resources used by the auditor. If nothing is present, the spellcheck feature disables itself safely.
 
-## Expected files
+## Files
 
-- `en_US.aff`
-- `en_US.dic`
+- `en_US.aff` / `en_US.dic` — Hunspell dictionary files for English (US).
+- `allowlist.txt` — One term per line (case‑insensitive). Terms present here are never flagged as typos. Useful for brand and industry words (e.g., “Mijenta”, “reposado”, “añejo”).
 
-If these files are **missing**, the spellchecker **disables itself safely** and the audit continues without reporting typos.
+## Adding dictionaries
 
-## Where to get them
+You have several options:
 
-- npm: `dictionary-en` (Hunspell English)
-- Alternatively, any compatible Hunspell `en_US` pair (`.aff` + `.dic`) works.
-
-## Custom terms
-
-You can extend the whitelist via env:
+### 1) Copy system Hunspell files (Homebrew on macOS)
 
 ```bash
-export BEVSTACK_AUDITOR_SPELL_WHITELIST_APPEND="bevstack,shopify,sku,añejo"
+# example paths; adjust if needed
+cp /opt/homebrew/share/hunspell/en_US.aff assets/dictionaries/en_US.aff
+cp /opt/homebrew/share/hunspell/en_US.dic assets/dictionaries/en_US.dic
 ```
+
+### 2) Use an npm package
+
+If you prefer npm‑managed dictionaries, install a package that provides `.aff/.dic` files (e.g., `dictionary-en` or similar) and copy the files into this folder. The export shapes differ across packages, so a robust Node snippet is recommended to write the files at build time.
+
+### 3) Skip dictionaries
+
+If the `.aff/.dic` files are absent, the auditor runs without spellchecking.
+
+## Allowlist
+
+Create `allowlist.txt` and add one term per line. The spellchecker will ignore exact case‑insensitive matches for these terms (after basic normalization). You can also append a comma‑separated list via the `BEVSTACK_SPELL_WHITELIST_APPEND` environment variable.

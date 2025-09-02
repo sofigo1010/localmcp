@@ -52,6 +52,18 @@ function getTails(kind, defaults) {
   return [...pre.map(norm), ...defaults.map(norm), ...app.map(norm)];
 }
 
+// ---- Tolerancia de secciones faltantes por tipo (configurable por ENV) ----
+function getMissingAllowance(type, env) {
+  const fromEnv = (k, dflt) => {
+    const v = Number(process.env[k] ?? env?.[k] ?? dflt);
+    return Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : dflt;
+  };
+  if (type === 'privacy') return fromEnv('BEVSTACK_ALLOW_MISSING_PRIVACY', 1);
+  if (type === 'terms')   return fromEnv('BEVSTACK_ALLOW_MISSING_TERMS', 2);
+  if (type === 'faq')     return fromEnv('BEVSTACK_ALLOW_MISSING_FAQ', 0);
+  return 0;
+}
+
 /**
  * @param {{ url:string }} args
  * @param {{ log?:(level:string,...args:any[])=>void }} ctx
@@ -163,7 +175,7 @@ export default async function auditSiteTool(args, { log }) {
 
   // Política de pase global:
   //  - Deben pasar privacy y terms.
-  //  - FAQ es laxa; si falla, NO bloquea el pase global (manteniendo tu lógica suave).
+  //  - FAQ es laxa; si falla, NO bloquea el pase global.
   const privacyPass = pages.find(p => p.type === 'privacy')?.pass ?? false;
   const termsPass   = pages.find(p => p.type === 'terms')?.pass ?? false;
 
@@ -189,6 +201,7 @@ export default async function auditSiteTool(args, { log }) {
  */
 async function auditOneType(type, candidates, env, log) {
   const thr = getSimilarityThreshold(type, env);
+  const missingAllowance = getMissingAllowance(type, env);
 
   let best = /** @type {ReturnType<typeof makeEmptyPage>} */ (makeEmptyPage(type));
   best.error = candidates?.length ? 'No candidate passed threshold' : 'No candidates found';
@@ -206,7 +219,6 @@ async function auditOneType(type, candidates, env, log) {
       html = text || '';
     } catch (err) {
       log?.('warn', `audit_site[${type}]: fetch failed for ${href}:`, err?.message || err);
-      // Seguimos con el siguiente candidato
       continue;
     }
 
@@ -219,10 +231,13 @@ async function auditOneType(type, candidates, env, log) {
       continue;
     }
 
+    const missingCount = Array.isArray(metrics.sectionsMissing) ? metrics.sectionsMissing.length : 0;
+    const passComputed = (metrics.similarity >= thr) && (missingCount <= missingAllowance);
+
     const page = {
       type,
       foundAt: href,
-      pass: !!metrics.pass,
+      pass: passComputed,
       similarity: clampPct(metrics.similarity),
       sectionsFound: metrics.sectionsFound || [],
       sectionsMissing: metrics.sectionsMissing || [],
@@ -239,8 +254,8 @@ async function auditOneType(type, candidates, env, log) {
       best = { ...page, error: undefined };
     }
 
-    // Early stop si supera claramente el umbral
-    if (page.similarity >= thr) {
+    // Early stop si supera claramente el umbral y cumple tolerancia
+    if (passComputed) {
       return { ...page, error: undefined };
     }
   }
